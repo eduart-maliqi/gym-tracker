@@ -35,6 +35,17 @@ function userDoc(col: string, id: string): DocumentReference {
   return doc(db, "users", uid(), col, id);
 }
 
+/**
+ * Alltags-Schreibzugriffe warten nicht auf die Server-Bestätigung: Firestore
+ * schreibt sofort in den lokalen Cache (die UI aktualisiert sich über die
+ * Watcher) und synchronisiert, sobald wieder Netz da ist. Mit await würde
+ * die UI offline endlos im Lade-Zustand hängen.
+ */
+function queued(write: Promise<unknown>): Promise<void> {
+  write.catch((e) => console.error("Firestore-Schreibfehler:", e));
+  return Promise.resolve();
+}
+
 // ---------- Nutzerprofile ----------
 
 export type UserStatus = "pending" | "active" | "blocked";
@@ -173,16 +184,16 @@ export function watchMeals(date: string, cb: (meals: Meal[]) => void) {
   });
 }
 
-export async function addMeal(meal: Omit<Meal, "id">) {
-  await addDoc(userCol("meals"), { ...meal, createdAt: serverTimestamp() });
+export function addMeal(meal: Omit<Meal, "id">) {
+  return queued(addDoc(userCol("meals"), { ...meal, createdAt: serverTimestamp() }));
 }
 
-export async function updateMeal(id: string, data: Partial<Omit<Meal, "id">>) {
-  await updateDoc(userDoc("meals", id), data);
+export function updateMeal(id: string, data: Partial<Omit<Meal, "id">>) {
+  return queued(updateDoc(userDoc("meals", id), data));
 }
 
-export async function deleteMeal(id: string) {
-  await deleteDoc(userDoc("meals", id));
+export function deleteMeal(id: string) {
+  return queued(deleteDoc(userDoc("meals", id)));
 }
 
 export async function getMealsInRange(from: string, to: string): Promise<Meal[]> {
@@ -198,12 +209,12 @@ export async function getWorkout(date: string): Promise<Workout | null> {
   return snap.exists() ? (snap.data() as Workout) : null;
 }
 
-export async function saveWorkout(w: Workout) {
-  await setDoc(userDoc("workouts", w.date), { ...w, createdAt: serverTimestamp() });
+export function saveWorkout(w: Workout) {
+  return queued(setDoc(userDoc("workouts", w.date), { ...w, createdAt: serverTimestamp() }));
 }
 
-export async function deleteWorkout(date: string) {
-  await deleteDoc(userDoc("workouts", date));
+export function deleteWorkout(date: string) {
+  return queued(deleteDoc(userDoc("workouts", date)));
 }
 
 export async function getWorkoutsInRange(from: string, to: string): Promise<Workout[]> {
@@ -238,20 +249,22 @@ export function watchMachines(cb: (machines: Machine[]) => void) {
   });
 }
 
-export async function addMachine(name: string, kg: number, date: string) {
-  await addDoc(userCol("machines"), {
-    name,
-    history: [{ date, kg }],
-    createdAt: serverTimestamp(),
-  });
+export function addMachine(name: string, kg: number, date: string) {
+  return queued(
+    addDoc(userCol("machines"), {
+      name,
+      history: [{ date, kg }],
+      createdAt: serverTimestamp(),
+    })
+  );
 }
 
-export async function updateMachine(id: string, data: Partial<Omit<Machine, "id">>) {
-  await updateDoc(userDoc("machines", id), data);
+export function updateMachine(id: string, data: Partial<Omit<Machine, "id">>) {
+  return queued(updateDoc(userDoc("machines", id), data));
 }
 
-export async function deleteMachine(id: string) {
-  await deleteDoc(userDoc("machines", id));
+export function deleteMachine(id: string) {
+  return queued(deleteDoc(userDoc("machines", id)));
 }
 
 // ---------- Kreatin ----------
@@ -260,12 +273,12 @@ export function watchCreatine(date: string, cb: (taken: boolean) => void) {
   return onSnapshot(userDoc("creatine", date), (snap) => cb(snap.exists()));
 }
 
-export async function setCreatineTaken(date: string, taken: boolean) {
-  if (taken) {
-    await setDoc(userDoc("creatine", date), { taken: true, createdAt: serverTimestamp() });
-  } else {
-    await deleteDoc(userDoc("creatine", date));
-  }
+export function setCreatineTaken(date: string, taken: boolean) {
+  return queued(
+    taken
+      ? setDoc(userDoc("creatine", date), { taken: true, createdAt: serverTimestamp() })
+      : deleteDoc(userDoc("creatine", date))
+  );
 }
 
 /** Dates (YYYY-MM-DD) with creatine taken, within [from, to] */
@@ -294,12 +307,12 @@ export function watchPhotos(cb: (photos: ProgressPhoto[]) => void) {
   });
 }
 
-export async function addPhoto(date: string, image: string) {
-  await addDoc(userCol("photos"), { date, image, createdAt: serverTimestamp() });
+export function addPhoto(date: string, image: string) {
+  return queued(addDoc(userCol("photos"), { date, image, createdAt: serverTimestamp() }));
 }
 
-export async function deletePhoto(id: string) {
-  await deleteDoc(userDoc("photos", id));
+export function deletePhoto(id: string) {
+  return queued(deleteDoc(userDoc("photos", id)));
 }
 
 // ---------- Push-Subscriptions ----------
@@ -325,8 +338,22 @@ export async function getSettings(): Promise<Settings> {
     : DEFAULT_SETTINGS;
 }
 
-export async function saveSettings(s: Partial<Settings>) {
-  await setDoc(userDoc("config", "settings"), s, { merge: true });
+export function saveSettings(s: Partial<Settings>) {
+  return queued(setDoc(userDoc("config", "settings"), s, { merge: true }));
+}
+
+// ---------- Wochenplan (optional) ----------
+
+/** Muskelgruppen pro Wochentag; Schlüssel "0" (Mo) … "6" (So), fehlend/leer = nichts geplant. */
+export type WeekPlan = Record<string, string[]>;
+
+export async function getWeekPlan(): Promise<WeekPlan> {
+  const snap = await getDoc(userDoc("config", "weekplan"));
+  return snap.exists() ? (snap.data() as WeekPlan) : {};
+}
+
+export function saveWeekPlan(plan: WeekPlan) {
+  return queued(setDoc(userDoc("config", "weekplan"), plan));
 }
 
 export async function getOpenAiKey(): Promise<string> {

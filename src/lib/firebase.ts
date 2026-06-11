@@ -13,7 +13,11 @@ import {
   updateProfile,
   type User,
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   projectId: "gym-tracker-eduard",
@@ -26,7 +30,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Offline-Persistenz: Lesezugriffe kommen ohne Netz aus dem IndexedDB-Cache,
+// Schreibzugriffe werden gepuffert und automatisch synchronisiert.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 
 // Benutzername-Konten laufen intern über eine Pseudo-E-Mail (wird nie verschickt)
 const USERNAME_DOMAIN = "gym-tracker-eduart.web.app";

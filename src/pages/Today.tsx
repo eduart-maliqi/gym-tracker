@@ -7,10 +7,12 @@ import {
   watchCreatine,
   setCreatineTaken,
   getCreatineInRange,
+  getWeekPlan,
   type Meal,
   type Settings,
+  type WeekPlan,
 } from "../lib/db";
-import { addDays, germanDate, today } from "../lib/dates";
+import { WEEKDAYS, addDays, germanDate, today, weekStart } from "../lib/dates";
 import { Button, Card, Input, ProgressBar, Sheet } from "../components/ui";
 
 const SOURCE_ICON: Record<Meal["source"], string> = {
@@ -35,36 +37,63 @@ export default function Today({
   const [busy, setBusy] = useState(false);
   const [creatineTaken, setCreatineTakenState] = useState(false);
   const [creatineDays, setCreatineDays] = useState<Set<string> | null>(null);
+  const [date, setDate] = useState(today());
+  const [plan, setPlan] = useState<WeekPlan>({});
 
-  const date = today();
+  const todayStr = today();
+  const isToday = date === todayStr;
+
+  useEffect(() => {
+    getWeekPlan().then(setPlan).catch(() => {});
+  }, []);
 
   useEffect(() => watchMeals(date, setMeals), [date]);
 
   useEffect(() => watchCreatine(date, setCreatineTakenState), [date]);
 
   useEffect(() => {
-    getCreatineInRange(addDays(date, -90), date)
+    getCreatineInRange(addDays(date, -90), todayStr)
       .then((days) => setCreatineDays(new Set(days)))
       .catch(() => {});
-  }, [date, creatineTaken]);
+  }, [date, todayStr]);
+
+  // Woche (Mo–So) rund um den angezeigten Tag
+  const [wy, wm, wd] = date.split("-").map(Number);
+  const monday = weekStart(new Date(wy, wm - 1, wd));
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  const weekdayName = new Date(wy, wm - 1, wd).toLocaleDateString("de-DE", {
+    weekday: "long",
+  });
+  // Wochenplan-Eintrag für den angezeigten Tag (Mo = 0)
+  const weekdayIdx = (new Date(wy, wm - 1, wd).getDay() + 6) % 7;
+  const plannedGroups = plan[weekdayIdx] ?? [];
 
   // consecutive days incl. today (or ending yesterday if today not yet taken)
   let streak = 0;
   if (creatineDays) {
-    let d = creatineDays.has(date) ? date : addDays(date, -1);
+    let d = creatineDays.has(todayStr) ? todayStr : addDays(todayStr, -1);
     while (creatineDays.has(d)) {
       streak++;
       d = addDays(d, -1);
     }
   }
 
-  async function toggleCreatine() {
-    setCreatineTakenState(!creatineTaken); // optimistic, watcher corrects if needed
-    try {
-      await setCreatineTaken(date, !creatineTaken);
-    } catch {
-      setCreatineTakenState(creatineTaken);
-    }
+  function creatineOn(d: string): boolean {
+    if (d === date) return creatineTaken; // watcher is authoritative for the viewed day
+    return creatineDays?.has(d) ?? false;
+  }
+
+  function toggleCreatine() {
+    const next = !creatineTaken;
+    setCreatineTakenState(next); // optimistic, watcher corrects if needed
+    setCreatineDays((prev) => {
+      if (!prev) return prev;
+      const s = new Set(prev);
+      if (next) s.add(date);
+      else s.delete(date);
+      return s;
+    });
+    setCreatineTaken(date, next).catch(() => setCreatineTakenState(!next));
   }
 
   const totalKcal = meals.reduce((s, m) => s + m.kcal, 0);
@@ -99,10 +128,52 @@ export default function Today({
 
   return (
     <div className="space-y-4 p-4">
-      <div>
-        <h1 className="text-xl font-bold">Heute</h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">{germanDate(date)}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold">{isToday ? "Heute" : weekdayName}</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{germanDate(date)}</p>
+        </div>
+        <div className="flex items-center gap-1">
+          {!isToday && (
+            <button
+              onClick={() => setDate(todayStr)}
+              className="rounded-lg px-2 py-1 text-xs font-semibold text-emerald-500"
+            >
+              Heute
+            </button>
+          )}
+          <button
+            onClick={() => setDate(addDays(date, -1))}
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-lg shadow-sm dark:bg-zinc-900"
+            aria-label="Vorheriger Tag"
+          >
+            ‹
+          </button>
+          <button
+            onClick={() => setDate(addDays(date, 1))}
+            disabled={isToday}
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-lg shadow-sm disabled:opacity-30 dark:bg-zinc-900"
+            aria-label="Nächster Tag"
+          >
+            ›
+          </button>
+        </div>
       </div>
+
+      {plannedGroups.length > 0 && (
+        <Card className="flex items-center gap-3">
+          <span className="text-2xl">🏋️</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">
+              {isToday ? "Heute dran" : `${weekdayName} ist dran`}:{" "}
+              {plannedGroups.join(" · ")}
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Laut deinem Wochenplan 📋
+            </p>
+          </div>
+        </Card>
+      )}
 
       <Card className="space-y-4">
         <ProgressBar
@@ -128,26 +199,63 @@ export default function Today({
         <Button onClick={goFood}>📷 Foto / Chat</Button>
       </div>
 
-      <Card className="flex items-center gap-3">
-        <span className="text-2xl">💊</span>
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">Kreatin</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {creatineTaken
-              ? streak > 1
-                ? `Genommen ✅ · ${streak} Tage in Folge 🔥`
-                : "Genommen ✅"
-              : streak > 0
-                ? `Noch nicht genommen · Serie: ${streak} Tage`
-                : "Heute noch nicht genommen"}
-          </p>
+      <Card className="space-y-3">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">💊</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Kreatin</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {!isToday
+                ? creatineTaken
+                  ? "Genommen ✅"
+                  : "Nicht genommen"
+                : creatineTaken
+                  ? streak > 1
+                    ? `Genommen ✅ · ${streak} Tage in Folge 🔥`
+                    : "Genommen ✅"
+                  : streak > 0
+                    ? `Noch nicht genommen · Serie: ${streak} Tage`
+                    : "Heute noch nicht genommen"}
+            </p>
+          </div>
+          <Button
+            variant={creatineTaken ? "primary" : "secondary"}
+            onClick={toggleCreatine}
+          >
+            Genommen {creatineTaken ? "✅" : "✓"}
+          </Button>
         </div>
-        <Button
-          variant={creatineTaken ? "secondary" : "primary"}
-          onClick={toggleCreatine}
-        >
-          {creatineTaken ? "Rückgängig" : "Genommen ✓"}
-        </Button>
+        <div className="flex gap-1">
+          {weekDates.map((d, i) => {
+            const future = d > todayStr;
+            const taken = !future && creatineOn(d);
+            return (
+              <button
+                key={d}
+                onClick={() => setDate(d)}
+                disabled={future}
+                className={`flex flex-1 flex-col items-center gap-1 rounded-xl py-1.5 ${
+                  d === date ? "bg-zinc-100 dark:bg-zinc-800" : ""
+                }`}
+              >
+                <span className="text-[10px] font-medium text-zinc-400">
+                  {WEEKDAYS[i]}
+                </span>
+                <span
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
+                    taken
+                      ? "bg-emerald-500 text-white"
+                      : future
+                        ? "text-zinc-300 dark:text-zinc-700"
+                        : "bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400"
+                  }`}
+                >
+                  {taken ? "✓" : Number(d.slice(8))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </Card>
 
       <div className="space-y-2">
@@ -156,7 +264,9 @@ export default function Today({
         </h2>
         {meals.length === 0 && (
           <Card className="text-center text-sm text-zinc-500 dark:text-zinc-400">
-            Noch nichts gegessen eingetragen. 🍽️
+            {isToday
+              ? "Noch nichts gegessen eingetragen. 🍽️"
+              : "An diesem Tag nichts eingetragen. 🍽️"}
           </Card>
         )}
         {meals.map((m) => (

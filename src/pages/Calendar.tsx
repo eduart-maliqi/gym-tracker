@@ -3,10 +3,13 @@ import {
   MUSCLE_GROUPS,
   deleteWorkout,
   getCreatineInRange,
+  getWeekPlan,
   getWorkout,
   getWorkoutsInRange,
+  saveWeekPlan,
   saveWorkout,
   type Intensity,
+  type WeekPlan,
   type Workout,
   type WorkoutGroup,
 } from "../lib/db";
@@ -33,6 +36,40 @@ export default function CalendarPage() {
   const [existing, setExisting] = useState(false);
   const [neglected, setNeglected] = useState<{ name: string; last: string | null }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [plan, setPlan] = useState<WeekPlan>({});
+  const [planOpen, setPlanOpen] = useState(false);
+
+  useEffect(() => {
+    getWeekPlan().then(setPlan).catch(() => {});
+  }, []);
+
+  function togglePlanGroup(day: number, name: string) {
+    setPlan((p) => {
+      const cur = p[day] ?? [];
+      const next = cur.includes(name)
+        ? cur.filter((n) => n !== name)
+        : [...cur, name].sort(
+            (a, b) =>
+              MUSCLE_GROUPS.indexOf(a as (typeof MUSCLE_GROUPS)[number]) -
+              MUSCLE_GROUPS.indexOf(b as (typeof MUSCLE_GROUPS)[number])
+          );
+      return { ...p, [day]: next };
+    });
+  }
+
+  function savePlan() {
+    // leere Tage nicht mitspeichern
+    const cleaned: WeekPlan = {};
+    for (const [k, v] of Object.entries(plan)) {
+      if (v.length > 0) cleaned[k] = v;
+    }
+    saveWeekPlan(cleaned);
+    setPlan(cleaned);
+    setPlanOpen(false);
+  }
+
+  const planDays = WEEKDAYS.map((_, i) => plan[i] ?? []);
+  const hasPlan = planDays.some((g) => g.length > 0);
 
   const loadMonth = useCallback(async () => {
     const from = fmtDate(new Date(year, month, 1));
@@ -183,6 +220,71 @@ export default function CalendarPage() {
           Tippe auf einen Tag, um dein Training einzutragen
         </p>
       </Card>
+
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="font-medium">📋 Wochenplan</p>
+          <Button variant="secondary" onClick={() => setPlanOpen(true)}>
+            {hasPlan ? "Bearbeiten" : "Erstellen"}
+          </Button>
+        </div>
+        {hasPlan ? (
+          <div className="space-y-1">
+            {planDays.map((g, i) =>
+              g.length === 0 ? null : (
+                <div key={i} className="flex gap-2 text-sm">
+                  <span className="w-7 shrink-0 font-semibold text-zinc-400">
+                    {WEEKDAYS[i]}
+                  </span>
+                  <span className="text-zinc-600 dark:text-zinc-300">
+                    {g.join(" · ")}
+                  </span>
+                </div>
+              )
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Optional: Lege fest, was du an welchem Wochentag trainierst — die
+            Startseite zeigt dir dann, was heute dran ist.
+          </p>
+        )}
+      </Card>
+
+      <Sheet open={planOpen} onClose={() => setPlanOpen(false)} title="Wochenplan">
+        <div className="space-y-4">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Tippe pro Wochentag an, was du normalerweise trainierst. Tage ohne
+            Auswahl bleiben einfach frei — alles optional.
+          </p>
+          {WEEKDAYS.map((label, day) => (
+            <div key={label}>
+              <p className="mb-1.5 text-sm font-semibold">{label}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {MUSCLE_GROUPS.map((name) => {
+                  const sel = (plan[day] ?? []).includes(name);
+                  return (
+                    <button
+                      key={name}
+                      onClick={() => togglePlanGroup(day, name)}
+                      className={`rounded-full px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        sel
+                          ? "bg-emerald-600 text-white"
+                          : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <Button onClick={savePlan} className="w-full">
+            Speichern
+          </Button>
+        </div>
+      </Sheet>
 
       <Sheet
         open={selected !== null}

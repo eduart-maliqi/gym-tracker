@@ -58,6 +58,18 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const creatingProfile = useRef(false);
+  const [online, setOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
 
   useEffect(
     () =>
@@ -130,6 +142,12 @@ export default function App() {
           ⚙️
         </button>
       </header>
+
+      {!online && (
+        <div className="bg-amber-500/15 px-4 py-1.5 text-center text-xs font-medium text-amber-600 dark:text-amber-400">
+          📴 Offline — Einträge werden gespeichert und synchronisiert, sobald du wieder Netz hast
+        </div>
+      )}
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         {tab === "today" && <Today settings={settings} goFood={() => setTab("food")} />}
