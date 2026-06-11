@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Admin = Profil mit role "admin". Die Rolle kann nur ein Admin vergeben
+    // (create erzwingt "member", update dürfen nur Admins) — kein Selbst-Upgrade möglich.
+    function isAdmin() {
+      return request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isSelf(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isActive(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.status == 'active';
+    }
+
+    // ---- Nutzerprofile ----
+    match /users/{uid} {
+      allow get: if isSelf(uid) || isAdmin();
+      allow list: if isAdmin();
+      // Selbstregistrierung: nur eigenes Profil, immer gesperrt + ohne KI startend
+      allow create: if isSelf(uid)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role == 'member'
+        && request.resource.data.aiEnabled == false;
+      allow update, delete: if isAdmin();
+
+      // ---- alle persönlichen Daten (meals, workouts, photos, creatine, …) ----
+      match /{document=**} {
+        allow read, write: if (isSelf(uid) && isActive(uid)) || isAdmin();
+      }
+    }
+
+    // ---- globale Secrets (OpenAI-Key): nur Admin oder aktive Nutzer mit KI-Freigabe ----
+    match /config/secrets {
+      allow read: if isAdmin()
+        || (request.auth != null
+            && isActive(request.auth.uid)
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.aiEnabled == true);
+      allow write: if false;
+    }
+  }
+}

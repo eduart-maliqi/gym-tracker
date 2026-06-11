@@ -1,0 +1,13 @@
+{
+  "projects": {
+    "default": "gym-tracker-eduard"
+  },
+  "targets": {
+    "gym-tracker-eduard": {
+      "hosting": {
+        "main": ["gym-tracker-eduart"],
+        "old": ["gym-tracker-eduard"]
+      }
+    }
+  }
+}
